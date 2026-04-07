@@ -1,6 +1,50 @@
 # openclaw-anthropic-bridge
 
+[English](#english) | [Русский](#русский)
+
+---
+
+## English
+
 Local proxy bridge that connects [OpenClaw](https://github.com/nicholasgriffintn/openclaw) to Anthropic's Claude API using Claude Code OAuth tokens.
+
+Runs as a lightweight local service on `localhost`. OpenClaw sends requests to the bridge, and the bridge transforms them to match Anthropic's Claude Code API format, optionally routing through an external proxy for geo-blocked regions.
+
+```
+OpenClaw → localhost:3456 (bridge) → [optional proxy] → api.anthropic.com
+```
+
+### Key Features
+
+- **Claude Code OAuth** — Adds all required headers, metadata, billing, session IDs, and beta features
+- **Geo-blocking bypass** — Routes through external HTTP proxy (for Russia, China, etc.)
+- **Token optimization** — Compacts system prompts, truncates tool descriptions, deduplicates messages
+- **Streaming** — Full SSE streaming pass-through
+- **Update-proof** — No SDK patches; survives any OpenClaw update
+- **Configurable** — Toggle each optimization on/off via CLI
+
+---
+
+## Русский
+
+Локальный прокси-мост между [OpenClaw](https://github.com/nicholasgriffintn/openclaw) и Anthropic Claude API с поддержкой Claude Code OAuth токенов.
+
+Работает как легковесный локальный сервис на `localhost`. OpenClaw отправляет запросы в bridge, а bridge трансформирует их в формат Anthropic Claude Code API и опционально маршрутизирует через внешний прокси для обхода гео-блокировки.
+
+```
+OpenClaw → localhost:3456 (bridge) → [внешний прокси] → api.anthropic.com
+```
+
+### Возможности
+
+- **Claude Code OAuth** — Добавляет все необходимые заголовки, metadata, billing, session ID и beta-фичи
+- **Обход гео-блокировки** — Маршрутизация через внешний HTTP прокси (для РФ, Китая и др.)
+- **Оптимизация токенов** — Компактит system prompt, обрезает описания tools, убирает дубли сообщений
+- **Streaming** — Полная поддержка SSE streaming
+- **Не ломается при обновлениях** — Никаких патчей SDK; переживает любое обновление OpenClaw
+- **Настраиваемый** — Каждая оптимизация включается/выключается через CLI
+
+---
 
 ## Why?
 
