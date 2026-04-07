@@ -263,7 +263,7 @@ function start(overrides = {}) {
     }
 
     const startTime = Date.now();
-    const logEntry = { time: new Date().toISOString(), model: null, status: null, bodySize: 0, inputTokens: null, durationMs: null, reqHeaders: {}, respPreview: '' };
+    const logEntry = { time: new Date().toISOString(), model: null, status: null, bodySize: 0, inputTokens: null, cacheRead: null, cacheCreated: null, durationMs: null, reqHeaders: {}, respPreview: '' };
 
     try {
       // Read body
@@ -340,11 +340,14 @@ function start(overrides = {}) {
             const { done, value } = await reader.read();
             if (done) break;
             if (firstChunk) {
-              logEntry.respPreview = Buffer.from(value).toString().substring(0, 300);
-              // Try to extract input_tokens from first chunk
+              logEntry.respPreview = Buffer.from(value).toString().substring(0, 500);
               try {
                 const match = logEntry.respPreview.match(/"input_tokens":(\d+)/);
                 if (match) logEntry.inputTokens = parseInt(match[1]);
+                const cacheRead = logEntry.respPreview.match(/"cache_read_input_tokens":(\d+)/);
+                if (cacheRead) logEntry.cacheRead = parseInt(cacheRead[1]);
+                const cacheCreate = logEntry.respPreview.match(/"cache_creation_input_tokens":(\d+)/);
+                if (cacheCreate) logEntry.cacheCreated = parseInt(cacheCreate[1]);
               } catch {}
               firstChunk = false;
             }
@@ -363,7 +366,8 @@ function start(overrides = {}) {
       }
 
       addLog(logEntry);
-      console.log(`  → ${logEntry.status} | ${logEntry.durationMs}ms | ${logEntry.inputTokens || '?'} tokens`);
+      const cacheInfo = logEntry.cacheRead ? ` | cache_read:${logEntry.cacheRead}` : (logEntry.cacheCreated ? ` | cache_new:${logEntry.cacheCreated}` : '');
+      console.log(`  → ${logEntry.status} | ${logEntry.durationMs}ms | ${logEntry.inputTokens || '?'} tokens${cacheInfo}`);
 
     } catch (err) {
       logEntry.status = 500;

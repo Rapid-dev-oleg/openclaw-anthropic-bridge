@@ -50,8 +50,51 @@ function transformRequest(body, headers, config) {
     }
   }
 
-  // 4. Compact system prompt
-  if (config.compact.systemPrompt && Array.isArray(parsed.system)) {
+  // 4. Prompt caching — add cache_control to system blocks
+  if (config.caching.enabled && Array.isArray(parsed.system)) {
+    const ttl = config.caching.ttl || '5m';
+    const scope = config.caching.scope || null;
+    parsed.system = parsed.system.map((block, i) => {
+      // Cache the last (largest) system block, or all if configured
+      const shouldCache = config.caching.cacheAll ? true : (i === parsed.system.length - 1);
+      if (shouldCache && !block.cache_control) {
+        return {
+          ...block,
+          cache_control: {
+            type: "ephemeral",
+            ...(ttl !== '5m' ? { ttl } : {}),
+            ...(scope ? { scope } : {}),
+          }
+        };
+      }
+      return block;
+    });
+  }
+
+  // 5. Cache tools — add cache_control to last tool
+  if (config.caching.enabled && config.caching.cacheTools && parsed.tools && parsed.tools.length > 0) {
+    const lastIdx = parsed.tools.length - 1;
+    if (!parsed.tools[lastIdx].cache_control) {
+      parsed.tools[lastIdx] = {
+        ...parsed.tools[lastIdx],
+        cache_control: { type: "ephemeral" }
+      };
+    }
+  }
+
+  // 6. Cache last user message
+  if (config.caching.enabled && config.caching.cacheMessages && parsed.messages && parsed.messages.length > 0) {
+    const lastMsg = parsed.messages[parsed.messages.length - 1];
+    if (lastMsg.role === 'user' && Array.isArray(lastMsg.content)) {
+      const lastContent = lastMsg.content[lastMsg.content.length - 1];
+      if (lastContent && !lastContent.cache_control) {
+        lastContent.cache_control = { type: "ephemeral" };
+      }
+    }
+  }
+
+  // 7. Compact system prompt (only if compaction enabled AND caching disabled)
+  if (config.compact.systemPrompt && !config.caching.enabled && Array.isArray(parsed.system)) {
     parsed.system = parsed.system.map(block => {
       if (block.text && block.text.length > config.compact.systemPromptMaxLen) {
         block = { ...block, text: compactSystemPrompt(block.text, config) };
@@ -60,8 +103,8 @@ function transformRequest(body, headers, config) {
     });
   }
 
-  // 5. Compact tool descriptions
-  if (config.compact.toolDescriptions && parsed.tools) {
+  // 8. Compact tool descriptions (only if compaction enabled AND tool caching disabled)
+  if (config.compact.toolDescriptions && !(config.caching.enabled && config.caching.cacheTools) && parsed.tools) {
     parsed.tools = parsed.tools.map(tool => ({
       ...tool,
       description: tool.description && tool.description.length > config.compact.toolDescMaxLen
@@ -70,7 +113,7 @@ function transformRequest(body, headers, config) {
     }));
   }
 
-  // 6. Deduplicate consecutive identical messages
+  // 9. Deduplicate consecutive identical messages (always available)
   if (config.compact.deduplicateMessages && parsed.messages) {
     const deduped = [parsed.messages[0]];
     for (let i = 1; i < parsed.messages.length; i++) {
@@ -89,7 +132,7 @@ function compactSystemPrompt(text, config) {
   const sections = text.split('\n## ');
   const essential = new Set(config.essentialSections);
 
-  let compacted = sections[0]; // header before first ##
+  let compacted = sections[0];
   for (let i = 1; i < sections.length; i++) {
     const title = sections[i].split('\n')[0].trim();
     const isEssential = [...essential].some(e => title.includes(e));
@@ -106,18 +149,12 @@ function compactSystemPrompt(text, config) {
 function transformHeaders(headers, config) {
   const out = { ...headers };
 
-  // Set beta features
   out['anthropic-beta'] = config.betaFeatures.join(',');
-
-  // Set user-agent
   out['user-agent'] = `claude-cli/${config.claudeVersion} (external, cli)`;
-
-  // Set identity headers
   out['x-app'] = 'cli';
   out['X-Claude-Code-Session-Id'] = sessionId;
   out['anthropic-dangerous-direct-browser-access'] = 'true';
 
-  // Ensure anthropic-version
   if (!out['anthropic-version']) {
     out['anthropic-version'] = '2023-06-01';
   }

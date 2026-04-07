@@ -8,12 +8,20 @@ const DEFAULTS = {
   port: 3456,
   proxy: null,          // "http://user:pass@host:port"
   claudeVersion: "2.1.92",
+  caching: {
+    enabled: true,          // use Anthropic prompt caching (recommended)
+    ttl: "1h",              // cache TTL: "5m" or "1h"
+    scope: "global",        // cache scope: null or "global"
+    cacheAll: false,        // cache all system blocks (false = only last)
+    cacheTools: true,       // cache tool definitions
+    cacheMessages: true,    // cache last user message
+  },
   compact: {
-    systemPrompt: true,     // compact system prompt
+    systemPrompt: false,    // compact system prompt (disabled when caching on)
     systemPromptMaxLen: 8000,
-    toolDescriptions: true, // truncate tool descriptions
+    toolDescriptions: false, // truncate tool descriptions (disabled when caching on)
     toolDescMaxLen: 200,
-    deduplicateMessages: true,
+    deduplicateMessages: true, // always useful
   },
   // essential sections to keep when compacting system prompt
   essentialSections: [
@@ -51,7 +59,7 @@ function load() {
   }
   try {
     const stored = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    return { ...DEFAULTS, ...stored, compact: { ...DEFAULTS.compact, ...stored.compact } };
+    return { ...DEFAULTS, ...stored, compact: { ...DEFAULTS.compact, ...stored.compact }, caching: { ...DEFAULTS.caching, ...(stored.caching || {}) } };
   } catch {
     return { ...DEFAULTS };
   }

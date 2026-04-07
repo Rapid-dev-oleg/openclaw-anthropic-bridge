@@ -107,7 +107,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <span class="count" id="logCount">0 requests</span>
     </div>
     <table class="log-table">
-      <thead><tr><th>Time</th><th>Model</th><th>Status</th><th>Tokens</th><th>Size</th><th>Duration</th></tr></thead>
+      <thead><tr><th>Time</th><th>Model</th><th>Status</th><th>Tokens</th><th>Cache</th><th>Size</th><th>Duration</th></tr></thead>
       <tbody id="logBody"></tbody>
     </table>
     <div class="empty" id="emptyLogs">No requests yet</div>
@@ -249,9 +249,11 @@ function renderLogs() {
     return '<tr onclick="toggleDetail(this)" style="cursor:pointer">' +
       '<td>' + time + '</td><td class="' + mc + '">' + (l.model||'?') + '</td>' +
       '<td><span class="badge ' + sc + '">' + (l.status||'...') + '</span></td>' +
-      '<td>' + (l.inputTokens||'-') + '</td><td>' + fmtB(l.bodySize) + '</td>' +
+      '<td>' + (l.inputTokens||'-') + '</td>' +
+      '<td>' + (l.cacheRead ? '<span style=\"color:#4ade80\">read:'+l.cacheRead+'</span>' : l.cacheCreated ? '<span style=\"color:#fb923c\">new:'+l.cacheCreated+'</span>' : '-') + '</td>' +
+      '<td>' + fmtB(l.bodySize) + '</td>' +
       '<td>' + (l.durationMs ? l.durationMs+'ms' : '-') + '</td></tr>' +
-      '<tr><td colspan="6"><div class="log-detail" id="d-'+i+'">' +
+      '<tr><td colspan="7"><div class="log-detail" id="d-'+i+'">' +
       esc(JSON.stringify(l.reqHeaders||{},null,2)) + '\\n\\n' + esc(l.respPreview||'') +
       '</div></td></tr>';
   }).join('');
