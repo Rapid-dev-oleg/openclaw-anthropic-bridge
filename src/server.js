@@ -79,6 +79,169 @@ function start(overrides = {}) {
       return;
     }
 
+    // API: detect token
+    if (req.method === 'GET' && req.url === '/api/setup/detect-token') {
+      const fs = require('fs');
+      const path = require('path');
+      const HOME = process.env.HOME || '/root';
+      const candidates = [
+        process.env.CLAUDE_CREDENTIALS,
+        path.join(HOME, '.claude', '.credentials.json'),
+        path.join(HOME, '.claude-code', '.credentials.json'),
+        path.join(HOME, '.config', 'claude', '.credentials.json'),
+        path.join(HOME, '.config', 'claude-code', 'credentials.json'),
+      ].filter(Boolean);
+      let token = null, credPath = null, expiresIn = null;
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          try {
+            const creds = JSON.parse(fs.readFileSync(p, 'utf8'));
+            token = creds?.claudeAiOauth?.accessToken;
+            if (token) {
+              credPath = p;
+              const exp = creds?.claudeAiOauth?.expiresAt;
+              if (exp) expiresIn = Math.round((exp - Date.now()) / 60000);
+              break;
+            }
+          } catch {}
+        }
+      }
+      res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+      res.end(JSON.stringify({ token: token || null, path: credPath, expiresIn }));
+      return;
+    }
+
+    // API: test API connection
+    if (req.method === 'POST' && req.url === '/api/setup/test-api') {
+      try {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const { proxy } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+
+        // Get token
+        const fs = require('fs');
+        const path = require('path');
+        const HOME = process.env.HOME || '/root';
+        let token = null;
+        for (const p of [process.env.CLAUDE_CREDENTIALS, path.join(HOME, '.claude', '.credentials.json')].filter(Boolean)) {
+          if (fs.existsSync(p)) {
+            try { token = JSON.parse(fs.readFileSync(p, 'utf8'))?.claudeAiOauth?.accessToken; if (token) break; } catch {}
+          }
+        }
+        if (!token) {
+          res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+          res.end(JSON.stringify({ status: 0, error: 'No token found' }));
+          return;
+        }
+
+        const undici = require('undici');
+        const fetchOpts = {
+          method: 'POST',
+          headers: {
+            'authorization': `Bearer ${token}`,
+            'content-type': 'application/json',
+            'anthropic-version': '2023-06-01',
+            'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+            'user-agent': 'claude-cli/2.1.92 (external, cli)',
+            'x-app': 'cli',
+          },
+          body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 }),
+        };
+        const useProxy = proxy || cfg.proxy;
+        if (useProxy) {
+          const pu = new URL(useProxy);
+          fetchOpts.dispatcher = new undici.ProxyAgent({
+            uri: `${pu.protocol}//${pu.hostname}:${pu.port}`,
+            ...(pu.username ? { token: 'Basic ' + Buffer.from(`${pu.username}:${pu.password}`).toString('base64') } : {})
+          });
+        }
+        const resp = await undici.fetch('https://api.anthropic.com/v1/messages?beta=true', fetchOpts);
+        let error = null;
+        if (!resp.ok) { try { const b = await resp.json(); error = b?.error?.message; } catch {} }
+        res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+        res.end(JSON.stringify({ status: resp.status, error }));
+      } catch (e) {
+        res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+        res.end(JSON.stringify({ status: 0, error: e.message }));
+      }
+      return;
+    }
+
+    // API: patch openclaw config
+    if (req.method === 'POST' && req.url === '/api/setup/patch-openclaw') {
+      const fs = require('fs');
+      const path = require('path');
+      const HOME = process.env.HOME || '/root';
+      const ocPath = process.env.OPENCLAW_CONFIG || path.join(HOME, '.openclaw', 'openclaw.json');
+      try {
+        if (!fs.existsSync(ocPath)) throw new Error('openclaw.json not found at ' + ocPath);
+        const oc = JSON.parse(fs.readFileSync(ocPath, 'utf8'));
+        if (!oc.models) oc.models = {};
+        if (!oc.models.providers) oc.models.providers = {};
+
+        // Get token
+        let token = null;
+        for (const p of [path.join(HOME, '.claude', '.credentials.json')].filter(Boolean)) {
+          if (fs.existsSync(p)) { try { token = JSON.parse(fs.readFileSync(p, 'utf8'))?.claudeAiOauth?.accessToken; } catch {} }
+        }
+
+        oc.models.providers.anthropic = {
+          baseUrl: `http://127.0.0.1:${cfg.port}`,
+          apiKey: token || '${ANTHROPIC_API_KEY}',
+          api: 'anthropic-messages',
+          models: [
+            { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', api: 'anthropic-messages', reasoning: true, input: ['text','image'], cost: {input:0,output:0,cacheRead:0,cacheWrite:0}, contextWindow: 200000, maxTokens: 16000 },
+            { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', api: 'anthropic-messages', reasoning: true, input: ['text','image'], cost: {input:0,output:0,cacheRead:0,cacheWrite:0}, contextWindow: 200000, maxTokens: 16000 },
+            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', api: 'anthropic-messages', reasoning: false, input: ['text'], cost: {input:0,output:0,cacheRead:0,cacheWrite:0}, contextWindow: 200000, maxTokens: 8192 },
+          ]
+        };
+        if (!oc.auth) oc.auth = {};
+        if (!oc.auth.profiles) oc.auth.profiles = {};
+        oc.auth.profiles['anthropic:default'] = { provider: 'anthropic', mode: 'token' };
+        if (token && !oc.env) oc.env = {};
+        if (token) oc.env.ANTHROPIC_API_KEY = token;
+        if (oc.agents?.defaults?.models) {
+          oc.agents.defaults.models['anthropic/claude-opus-4-6'] = { alias: 'opus' };
+          oc.agents.defaults.models['anthropic/claude-sonnet-4-6'] = { alias: 'sonnet' };
+        }
+        fs.writeFileSync(ocPath, JSON.stringify(oc, null, 2));
+        res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+      return;
+    }
+
+    // API: save manual token
+    if (req.method === 'POST' && req.url === '/api/setup/save-token') {
+      try {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const { token } = JSON.parse(Buffer.concat(chunks).toString());
+        if (!token) throw new Error('No token provided');
+
+        const fs = require('fs');
+        const path = require('path');
+        const HOME = process.env.HOME || '/root';
+        const ocPath = process.env.OPENCLAW_CONFIG || path.join(HOME, '.openclaw', 'openclaw.json');
+        if (fs.existsSync(ocPath)) {
+          const oc = JSON.parse(fs.readFileSync(ocPath, 'utf8'));
+          if (!oc.env) oc.env = {};
+          oc.env.ANTHROPIC_API_KEY = token;
+          if (oc.models?.providers?.anthropic) oc.models.providers.anthropic.apiKey = token;
+          fs.writeFileSync(ocPath, JSON.stringify(oc, null, 2));
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+      return;
+    }
+
     // Status
     if (req.method === 'GET' && req.url === '/status') {
       res.writeHead(200, { 'content-type': 'application/json' });
