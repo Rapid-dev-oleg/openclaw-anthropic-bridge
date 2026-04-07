@@ -164,7 +164,7 @@ function start(overrides = {}) {
       // Stream response back
       const respHeaders = Object.fromEntries(
         [...response.headers.entries()].filter(([k]) =>
-          !['transfer-encoding', 'connection', 'content-length'].includes(k.toLowerCase())
+          !['transfer-encoding', 'connection', 'content-length', 'content-encoding'].includes(k.toLowerCase())
         )
       );
       res.writeHead(response.status, respHeaders);
