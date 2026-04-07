@@ -6,82 +6,68 @@
 
 ## English
 
-Local proxy bridge that connects [OpenClaw](https://github.com/nicholasgriffintn/openclaw) to Anthropic's Claude API using Claude Code OAuth tokens.
+Local proxy bridge that connects [OpenClaw](https://github.com/nicholasgriffintn/openclaw) to Anthropic's Claude API (Opus 4.6, Sonnet 4.6, Haiku 4.5) using Claude Code OAuth tokens.
 
-Runs as a lightweight local service on `localhost`. OpenClaw sends requests to the bridge, and the bridge transforms them to match Anthropic's Claude Code API format, optionally routing through an external proxy for geo-blocked regions.
+### Why?
 
-```
-OpenClaw → localhost:3456 (bridge) → [optional proxy] → api.anthropic.com
-```
-
-### Key Features
-
-- **Claude Code OAuth** — Adds all required headers, metadata, billing, session IDs, and beta features
-- **Geo-blocking bypass** — Routes through external HTTP proxy (for Russia, China, etc.)
-- **Token optimization** — Compacts system prompts, truncates tool descriptions, deduplicates messages
-- **Streaming** — Full SSE streaming pass-through
-- **Update-proof** — No SDK patches; survives any OpenClaw update
-- **Configurable** — Toggle each optimization on/off via CLI
-
----
-
-## Русский
-
-Локальный прокси-мост между [OpenClaw](https://github.com/nicholasgriffintn/openclaw) и Anthropic Claude API с поддержкой Claude Code OAuth токенов.
-
-Работает как легковесный локальный сервис на `localhost`. OpenClaw отправляет запросы в bridge, а bridge трансформирует их в формат Anthropic Claude Code API и опционально маршрутизирует через внешний прокси для обхода гео-блокировки.
+OpenClaw doesn't natively support Claude Code OAuth authentication. Node.js `fetch()` ignores system proxy settings, causing 403 errors in geo-blocked regions. This bridge solves both problems — sits between OpenClaw and the Anthropic API, transparently handling auth, headers, proxy routing, and request optimization.
 
 ```
-OpenClaw → localhost:3456 (bridge) → [внешний прокси] → api.anthropic.com
+OpenClaw → localhost:3456 (bridge) → [external proxy] → api.anthropic.com
 ```
 
-### Возможности
+### Features
 
-- **Claude Code OAuth** — Добавляет все необходимые заголовки, metadata, billing, session ID и beta-фичи
-- **Обход гео-блокировки** — Маршрутизация через внешний HTTP прокси (для РФ, Китая и др.)
-- **Оптимизация токенов** — Компактит system prompt, обрезает описания tools, убирает дубли сообщений
-- **Streaming** — Полная поддержка SSE streaming
-- **Не ломается при обновлениях** — Никаких патчей SDK; переживает любое обновление OpenClaw
-- **Настраиваемый** — Каждая оптимизация включается/выключается через CLI
+- **One-command setup** — `auto-setup` reads Claude Code credentials, tests the connection, patches OpenClaw config, all automatically
+- **Admin UI** — Web dashboard at `/admin` with real-time request logs and settings panel
+- **Claude Code OAuth** — Adds all required headers: billing, session IDs, beta features, metadata, thinking config
+- **Geo-blocking bypass** — Routes through external HTTP proxy with auth (for Russia, China, etc.)
+- **Token optimization** — Compacts system prompts, truncates tool descriptions, deduplicates messages. Each toggle on/off
+- **Full streaming** — SSE streaming pass-through with proper header handling
+- **Update-proof** — Zero SDK patches; survives any OpenClaw or npm update
+- **systemd service** — One command to install as a background service
 
----
-
-## Why?
-
-OpenClaw doesn't natively support Claude Code OAuth authentication. This bridge sits between OpenClaw and the Anthropic API, transparently adding all required headers, metadata, and request transformations so Claude models (Opus 4.6, Sonnet 4.6, Haiku 4.5) work seamlessly.
-
-```
-OpenClaw → localhost:3456 (bridge) → [optional proxy] → api.anthropic.com
-```
-
-## Features
-
-- **Claude Code OAuth support** — Adds required billing headers, session IDs, beta features, and metadata
-- **Geo-blocking bypass** — Routes requests through an external HTTP proxy (for regions where Anthropic is blocked by Cloudflare)
-- **System prompt compaction** — Trims large system prompts to save input tokens (configurable)
-- **Tool description compaction** — Truncates verbose tool descriptions (configurable)
-- **Message deduplication** — Removes consecutive duplicate messages (configurable)
-- **Streaming support** — Full SSE streaming pass-through
-- **Zero SDK patching** — No modifications to OpenClaw or its dependencies; survives updates
-
-## Quick Start
+### Quick Start
 
 ```bash
 # Install
 npm install -g openclaw-anthropic-bridge
 
-# Setup (interactive)
-openclaw-anthropic-bridge setup
+# Auto-setup (recommended) — detects token, tests API, patches openclaw config
+openclaw-anthropic-bridge auto-setup
 
 # Start
 openclaw-anthropic-bridge start
+
+# Or install as service
+openclaw-anthropic-bridge install-service
 ```
 
-## Configuration
+That's it. OpenClaw will now use Claude models through the bridge.
 
-### Bridge Config
+### Admin UI
 
-Run `openclaw-anthropic-bridge setup` or edit `~/.openclaw-anthropic-bridge/config.json`:
+Open `http://127.0.0.1:3456/admin` in your browser:
+
+- **Logs tab** — Real-time request log with model, status, tokens, duration. Auto-refresh. Click row for details.
+- **Settings tab** — Toggle system prompt compaction, tool description truncation, message dedup. Change proxy. Save & restart.
+
+### Commands
+
+```bash
+auto-setup            # One-command automatic setup (recommended)
+setup                 # Interactive manual setup
+start                 # Start the bridge server
+status                # Show status, token expiry, diagnostics
+install-service       # Install as systemd user service
+
+enable <feature>      # Enable: compact-system, compact-tools, dedup
+disable <feature>     # Disable a feature
+```
+
+### Configuration
+
+Bridge config: `~/.openclaw-anthropic-bridge/config.json`
 
 ```json
 {
@@ -97,123 +83,89 @@ Run `openclaw-anthropic-bridge setup` or edit `~/.openclaw-anthropic-bridge/conf
 }
 ```
 
-### OpenClaw Config
-
-Add to your `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "models": {
-    "providers": {
-      "anthropic": {
-        "baseUrl": "http://127.0.0.1:3456",
-        "apiKey": "sk-ant-oat01-YOUR-OAUTH-TOKEN",
-        "api": "anthropic-messages",
-        "models": [
-          {
-            "id": "claude-opus-4-6",
-            "name": "Claude Opus 4.6",
-            "api": "anthropic-messages",
-            "reasoning": true,
-            "input": ["text", "image"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 200000,
-            "maxTokens": 16000
-          },
-          {
-            "id": "claude-sonnet-4-6",
-            "name": "Claude Sonnet 4.6",
-            "api": "anthropic-messages",
-            "reasoning": true,
-            "input": ["text", "image"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 200000,
-            "maxTokens": 16000
-          },
-          {
-            "id": "claude-haiku-4-5-20251001",
-            "name": "Claude Haiku 4.5",
-            "api": "anthropic-messages",
-            "reasoning": false,
-            "input": ["text"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 200000,
-            "maxTokens": 8192
-          }
-        ]
-      }
-    }
-  }
-}
-```
-
-## Commands
-
-```bash
-openclaw-anthropic-bridge setup              # Interactive setup wizard
-openclaw-anthropic-bridge start              # Start the bridge server
-openclaw-anthropic-bridge status             # Show current configuration
-
-openclaw-anthropic-bridge enable <feature>   # Enable a feature
-openclaw-anthropic-bridge disable <feature>  # Disable a feature
-```
-
-### Features
-
-| Feature | Description | Default |
-|---------|-------------|---------|
-| `compact-system` | Compact system prompts to save tokens | ON |
-| `compact-tools` | Truncate tool descriptions | ON |
-| `dedup` | Remove consecutive duplicate messages | ON |
-
-### Examples
-
-```bash
-# Disable system prompt compaction
-openclaw-anthropic-bridge disable compact-system
-
-# Enable message deduplication
-openclaw-anthropic-bridge enable dedup
-```
-
-## How It Works
-
-The bridge intercepts requests from OpenClaw and transforms them to match what Anthropic's API expects from Claude Code clients:
+### How It Works
 
 1. **URL** — Appends `?beta=true` to `/v1/messages`
 2. **Headers** — Adds `anthropic-beta`, `user-agent`, `x-app`, `X-Claude-Code-Session-Id`
 3. **Body** — Adds `metadata.user_id`, `thinking`, `output_config`, billing system prompt
-4. **Optimization** — Compacts system prompts, tool descriptions, deduplicates messages
-5. **Proxy** — Routes through external HTTP proxy if configured
+4. **Optimization** — Compacts system prompts (configurable limit), truncates tool descriptions, deduplicates consecutive identical messages
+5. **Proxy** — Routes through external HTTP proxy if configured (undici ProxyAgent)
+6. **Streaming** — Strips `content-encoding` to prevent double-decompression, streams SSE chunks
 
-## Getting Your OAuth Token
+### Prerequisites
 
-1. Log in to [Claude Code](https://claude.ai/code) CLI: `claude`
-2. Your token is stored in `~/.claude/.credentials.json`
-3. Copy the `accessToken` value (starts with `sk-ant-oat01-`)
+- [Claude Code](https://claude.ai/code) CLI installed and logged in (`~/.claude/.credentials.json`)
+- [OpenClaw](https://github.com/nicholasgriffintn/openclaw) installed
+- Node.js 18+
 
-Note: OAuth tokens expire periodically. If OpenClaw supports `mode: "token"` in auth profiles, it will handle refresh automatically.
+---
 
-## Running as a Service
+## Русский
 
-### systemd
+Локальный прокси-мост между [OpenClaw](https://github.com/nicholasgriffintn/openclaw) и Anthropic Claude API (Opus 4.6, Sonnet 4.6, Haiku 4.5) с поддержкой Claude Code OAuth токенов.
+
+### Зачем?
+
+OpenClaw не поддерживает Claude Code OAuth нативно. Node.js `fetch()` игнорирует системные настройки прокси, что вызывает ошибки 403 в гео-заблокированных регионах. Bridge решает обе проблемы — стоит между OpenClaw и Anthropic API, прозрачно обрабатывая авторизацию, заголовки, маршрутизацию через прокси и оптимизацию запросов.
+
+```
+OpenClaw → localhost:3456 (bridge) → [внешний прокси] → api.anthropic.com
+```
+
+### Возможности
+
+- **Настройка одной командой** — `auto-setup` читает credentials Claude Code, тестирует подключение, патчит конфиг OpenClaw — всё автоматически
+- **Админка** — Веб-панель на `/admin` с логами запросов в реальном времени и настройками
+- **Claude Code OAuth** — Добавляет все необходимые заголовки: billing, session ID, beta-фичи, metadata, thinking
+- **Обход гео-блокировки** — Маршрутизация через внешний HTTP прокси с авторизацией (РФ, Китай и др.)
+- **Оптимизация токенов** — Компактит system prompt, обрезает описания tools, убирает дубли сообщений. Каждая опция вкл/выкл
+- **Полный streaming** — SSE streaming с корректной обработкой заголовков
+- **Не ломается при обновлениях** — Никаких патчей SDK; переживает любое обновление OpenClaw или npm
+- **systemd сервис** — Одна команда для установки как фоновый сервис
+
+### Быстрый старт
 
 ```bash
-cat > ~/.config/systemd/user/openclaw-anthropic-bridge.service << EOF
-[Unit]
-Description=OpenClaw Anthropic Bridge
+# Установка
+npm install -g openclaw-anthropic-bridge
 
-[Service]
-ExecStart=$(which node) $(which openclaw-anthropic-bridge) start
-Restart=always
+# Авто-настройка (рекомендуется) — найдёт токен, проверит API, настроит openclaw
+openclaw-anthropic-bridge auto-setup
 
-[Install]
-WantedBy=default.target
-EOF
+# Запуск
+openclaw-anthropic-bridge start
 
-systemctl --user enable openclaw-anthropic-bridge
-systemctl --user start openclaw-anthropic-bridge
+# Или установить как сервис
+openclaw-anthropic-bridge install-service
 ```
+
+Готово. OpenClaw теперь использует модели Claude через bridge.
+
+### Админка
+
+Откройте `http://127.0.0.1:3456/admin` в браузере:
+
+- **Вкладка Logs** — Логи запросов в реальном времени: модель, статус, токены, длительность. Автообновление. Клик по строке — детали.
+- **Вкладка Settings** — Переключатели компакции prompt/tools/dedup. Настройка прокси. Сохранение.
+
+### Команды
+
+```bash
+auto-setup            # Автоматическая настройка (рекомендуется)
+setup                 # Интерактивная ручная настройка
+start                 # Запуск bridge
+status                # Статус, время жизни токена, диагностика
+install-service       # Установка как systemd сервис
+
+enable <feature>      # Включить: compact-system, compact-tools, dedup
+disable <feature>     # Выключить
+```
+
+### Требования
+
+- [Claude Code](https://claude.ai/code) CLI установлен и залогинен (`~/.claude/.credentials.json`)
+- [OpenClaw](https://github.com/nicholasgriffintn/openclaw) установлен
+- Node.js 18+
 
 ## License
 
