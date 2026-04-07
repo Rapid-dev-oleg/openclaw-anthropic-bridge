@@ -10,8 +10,26 @@ const rl = readline.createInterface({ input: process.stdin, output: process.stdo
 const ask = (q) => new Promise(resolve => rl.question(q, resolve));
 
 const HOME = process.env.HOME || '/root';
-const CLAUDE_CREDS = path.join(HOME, '.claude', '.credentials.json');
-const OPENCLAW_CONFIG = path.join(HOME, '.openclaw', 'openclaw.json');
+const OPENCLAW_CONFIG = process.env.OPENCLAW_CONFIG || path.join(HOME, '.openclaw', 'openclaw.json');
+
+// Find Claude Code credentials in multiple locations
+function findClaudeCreds() {
+  const candidates = [
+    process.env.CLAUDE_CREDENTIALS,
+    path.join(HOME, '.claude', '.credentials.json'),
+    path.join(HOME, '.claude-code', '.credentials.json'),
+    path.join(HOME, '.config', 'claude', '.credentials.json'),
+    path.join(HOME, '.config', 'claude-code', 'credentials.json'),
+    // Windows-style (WSL)
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'claude', '.credentials.json') : null,
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'claude', '.credentials.json') : null,
+  ].filter(Boolean);
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 const ANTHROPIC_MODELS = [
   {
@@ -57,24 +75,34 @@ async function autoSetup() {
 
   // Step 1: Find Claude Code token
   console.log('  [1/5] Looking for Claude Code credentials...');
-  if (fs.existsSync(CLAUDE_CREDS)) {
+  const credsPath = findClaudeCreds();
+  if (credsPath) {
     try {
-      const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS, 'utf8'));
+      const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
       token = creds?.claudeAiOauth?.accessToken;
       if (token) {
-        console.log(`    ✓ Found token: ${token.substring(0, 20)}...`);
+        console.log(`    ✓ Found token in ${credsPath}`);
+        console.log(`    → ${token.substring(0, 20)}...`);
       } else {
         errors.push('Token not found in credentials');
-        console.log('    ✗ No accessToken in credentials file');
+        console.log(`    ✗ No accessToken in ${credsPath}`);
       }
     } catch (e) {
       errors.push('Cannot parse credentials: ' + e.message);
-      console.log('    ✗ Cannot parse credentials file');
+      console.log(`    ✗ Cannot parse ${credsPath}`);
     }
   } else {
-    console.log('    ✗ ~/.claude/.credentials.json not found');
+    console.log('    ✗ Claude Code credentials not found');
+    console.log('    → Searched: ~/.claude/, ~/.claude-code/, ~/.config/claude/');
     console.log('    → Run "claude" CLI first to login');
-    errors.push('No credentials file');
+    console.log('    → Or set CLAUDE_CREDENTIALS=/path/to/credentials.json');
+    const manualToken = await ask('    Enter token manually (or empty to skip): ');
+    if (manualToken && manualToken.trim()) {
+      token = manualToken.trim();
+      console.log(`    ✓ Using manual token: ${token.substring(0, 20)}...`);
+    } else {
+      errors.push('No credentials found');
+    }
   }
 
   // Step 2: Ask for proxy (optional)
@@ -330,15 +358,19 @@ async function showStatus() {
   console.log(`  Config:            ${config.CONFIG_FILE}`);
 
   // Check Claude Code creds
-  if (fs.existsSync(CLAUDE_CREDS)) {
+  const credsPath = findClaudeCreds();
+  if (credsPath) {
     try {
-      const creds = JSON.parse(fs.readFileSync(CLAUDE_CREDS, 'utf8'));
+      const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
       const expires = creds?.claudeAiOauth?.expiresAt;
       if (expires) {
         const left = expires - Date.now();
         console.log(`  Token expires:     ${left > 0 ? Math.round(left / 60000) + ' min' : 'EXPIRED'}`);
       }
+      console.log(`  Credentials:       ${credsPath}`);
     } catch {}
+  } else {
+    console.log(`  Credentials:       not found`);
   }
 
   // Check bridge running
